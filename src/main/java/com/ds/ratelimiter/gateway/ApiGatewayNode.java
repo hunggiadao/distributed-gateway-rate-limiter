@@ -8,6 +8,7 @@ import com.ds.ratelimiter.model.ApiResponse;
 import com.ds.ratelimiter.model.RateLimitDecision;
 
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Represents one API Gateway node.
@@ -25,16 +26,16 @@ import java.util.List;
 public class ApiGatewayNode {
     private final String name;
     private final RateLimitStore rateLimitStore;
-    private final RateLimitConfig rateLimitConfig;
+    private final Function<String, RateLimitConfig> configProvider; // CHANGED
     private final List<BackendService> backendServices;
 
     public ApiGatewayNode(String name,
                           RateLimitStore rateLimitStore,
-                          RateLimitConfig rateLimitConfig,
+                          Function<String, RateLimitConfig> configProvider, // CHANGED
                           List<BackendService> backendServices) {
         this.name = name;
         this.rateLimitStore = rateLimitStore;
-        this.rateLimitConfig = rateLimitConfig;
+        this.configProvider = configProvider;
         this.backendServices = backendServices;
     }
 
@@ -52,7 +53,9 @@ public class ApiGatewayNode {
         // The client ID is used as the rate limit key.
         // Requests from the same client share one token bucket.
         String rateLimitKey = request.getClientId();
-        RateLimitDecision decision = rateLimitStore.consume(rateLimitKey + "|" + request.getPath(), rateLimitConfig);
+		// NEW: Look up the specific rules for THIS client before consuming tokens
+        RateLimitConfig config = configProvider.apply(request.getClientId());
+        RateLimitDecision decision = rateLimitStore.consume(rateLimitKey + "|" + request.getPath(), config);
 
         // 429 Too Many Requests: client has no tokens left.
         if (!decision.isAllowed()) {
