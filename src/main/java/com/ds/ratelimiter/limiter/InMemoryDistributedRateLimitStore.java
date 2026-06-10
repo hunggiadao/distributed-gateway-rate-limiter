@@ -2,15 +2,30 @@ package com.ds.ratelimiter.limiter;
 
 import com.ds.ratelimiter.model.RateLimitDecision;
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * InMemoryDistributedRateLimitStore is an in-memory implementation of the RateLimitStore interface.
+ * It manages rate-limiting state for clients using various algorithms (Token Bucket, Fixed Window, Sliding Window).
+ * This implementation is thread-safe and supports global server load shedding.
+ */
 public class InMemoryDistributedRateLimitStore implements RateLimitStore {
     private final Map<String, RateLimitState> buckets = new ConcurrentHashMap<>();
     
+	// Variables to track server-wide load shedding
     private long lastCurrentTimeMs = 0;
     private int totalRequestsThisMillisecond = 0;
     private int paymentRequestsThisMillisecond = 0;
 
+	/**
+     * Consumes a token for the given client and path based on the provided rate-limiting configuration.
+     * This method enforces global server load shedding and evaluates all enabled rate-limiting algorithms.
+     *
+     * @param key The client ID and path (e.g., "clientId|path").
+     * @param config The rate-limiting configuration.
+     * @return A RateLimitDecision indicating whether the request is allowed and the remaining tokens.
+     */
     @Override
     public synchronized RateLimitDecision consume(String key, RateLimitConfig config) {
         String path = key.contains("|") ? key.split("\\|")[1] : "/users";
@@ -112,7 +127,7 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
             swBucket = buckets.computeIfAbsent(clientId + ":sliding", k -> new RateLimitState(config.getSwLimit()));
             
             long windowStart = now - config.getSwWindowLengthMs();
-            java.util.Queue<Long> log = swBucket.getWindowLog();
+            Queue<Long> log = swBucket.getWindowLog();
             
             // Prune timestamps that have fallen out of the sliding time window
             while (!log.isEmpty() && log.peek() <= windowStart) {
@@ -182,6 +197,13 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
         return new RateLimitDecision(true, finalRemaining, "Success");
     }
 
+	/**
+     * Retrieves the minimum number of remaining tokens across all enabled algorithms.
+     *
+     * @param key The client ID and path.
+     * @param config The rate-limiting configuration.
+     * @return The minimum number of remaining tokens.
+     */
     @Override
     public synchronized int getRemainingTokens(String key, RateLimitConfig config) {
         // String path = key.contains("|") ? key.split("\\|")[1] : "/users";
@@ -218,7 +240,7 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
             RateLimitState sw = buckets.get(clientId + ":sliding");
             if (sw != null) {
                 long windowStart = now - config.getSwWindowLengthMs();
-                java.util.Queue<Long> log = sw.getWindowLog();
+                Queue<Long> log = sw.getWindowLog();
                 
                 // Prune old logs just for an accurate count in the UI
                 while (!log.isEmpty() && log.peek() <= windowStart) {
@@ -236,6 +258,13 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
 		return minTokens == Integer.MAX_VALUE ? 0 : minTokens;
     }
 
+	/**
+     * Retrieves detailed information about the remaining tokens for each enabled algorithm.
+     *
+     * @param key The client ID and path.
+     * @param config The rate-limiting configuration.
+     * @return A string describing the remaining tokens for each algorithm.
+     */
 	@Override
     public synchronized String getRemainingTokensDetailed(String key, RateLimitConfig config) {
         String clientId = key.contains("|") ? key.split("\\|")[0] : key;
@@ -274,7 +303,7 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
             int swVal;
             if (sw != null) {
                 long windowStart = now - config.getSwWindowLengthMs();
-                java.util.Queue<Long> log = sw.getWindowLog();
+                Queue<Long> log = sw.getWindowLog();
                 int validCount = 0;
                 for (Long t : log) {
                     if (t > windowStart) validCount++;
@@ -293,6 +322,9 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
         return res.isEmpty() ? "No algorithms active" : res;
     }
 
+	/**
+     * Resets all rate-limiting state, clearing all buckets and counters.
+     */
     @Override
     public synchronized void reset() {
         buckets.clear();

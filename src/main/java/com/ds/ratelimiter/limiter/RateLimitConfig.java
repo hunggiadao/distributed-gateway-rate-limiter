@@ -1,6 +1,10 @@
 package com.ds.ratelimiter.limiter;
 
-// Service Level Agreement
+/**
+ * Service Level Agreement (SLA)
+ * Holds all the rate limiting rules
+ * Can be assigned individually to clients or as a default for server
+ */
 public class RateLimitConfig {
 	// token bucket
     private final boolean tokenBucketEnabled;

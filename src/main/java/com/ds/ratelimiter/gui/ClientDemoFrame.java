@@ -9,11 +9,15 @@ import java.awt.GridLayout;
 import java.awt.Color;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Random;
 import java.util.*;
 import java.net.*;
 import java.io.*;
 
+/**
+ * The ClientDemoFrame class represents the GUI for a client in the distributed rate limiter system.
+ * It allows users to send API requests, perform burst requests, and monitor the remaining tokens
+ * for rate-limiting algorithms. The class communicates with the gateway server over a socket connection.
+ */
 public class ClientDemoFrame extends JFrame {
 	// private final GatewayDemoFrame gatewayFrame;
 	private final Random random = new Random();
@@ -34,11 +38,19 @@ public class ClientDemoFrame extends JFrame {
 	private final JButton inspectBtn = new JButton("Inspect DB State");
 	private final JButton clearBtn = new JButton("Clear Console");
 
-	// CRITICAL FIX: Replaced Object streams with raw Data streams to prevent NotSerializableException
+	// FIX: Replaced Object streams with raw Data streams to prevent NotSerializableException
 	private Socket socket;
 	private DataOutputStream out;
 	private DataInputStream in;
 
+	/**
+     * Constructs the ClientDemoFrame GUI.
+     *
+     * @param gatewayFrame The gateway frame (not used in this implementation).
+     * @param defaultClientId The default client ID to display in the GUI.
+     * @param startX The X-coordinate for the window's initial position.
+     * @param startY The Y-coordinate for the window's initial position.
+     */
 	public ClientDemoFrame(GatewayDemoFrame gatewayFrame, String defaultClientId, int startX, int startY) {
 		// this.gatewayFrame = gatewayFrame;
 		setTitle("Client Request Dashboard - " + defaultClientId);
@@ -103,8 +115,12 @@ public class ClientDemoFrame extends JFrame {
 		autoRefreshTimer.start();
 	}
 
+	/**
+     * Establishes a connection to the gateway server and maintains it in a background thread.
+     * Automatically reconnects if the connection is lost.
+     */
 	private void connectToGateway() {
-		// CRITICAL FIX: Self-healing background reconnect loop
+		// FIX: Self-healing background reconnect loop
 		new Thread(() -> {
 			while (true) {
 				if (socket == null || socket.isClosed()) {
@@ -122,7 +138,6 @@ public class ClientDemoFrame extends JFrame {
 						continue; // Keep trying until it wakes up
 					}
 				}
-				
 				try {
 					synchronized (socket) {
 						out.writeUTF("UPDATE_STATUS");
@@ -139,6 +154,11 @@ public class ClientDemoFrame extends JFrame {
 		}).start();
 	}
 
+	/**
+     * Registers the client with the gateway server.
+     *
+     * @param clientId The client ID to register.
+     */
 	private void remoteRegisterClient(String clientId) {
 		try {
 			if (socket != null && !socket.isClosed()) {
@@ -174,7 +194,7 @@ public class ClientDemoFrame extends JFrame {
 		} catch (Exception e) {}
 	}
 
-	// CRITICAL FIX: Manually sending primitive parameters to avoid NotSerializableException
+	// FIX: Manually sending primitive parameters to avoid NotSerializableException
 	private ApiResponse remoteSendRoundRobin(ApiRequest request) {
 		try {
 			if (socket != null && !socket.isClosed()) {
@@ -232,6 +252,9 @@ public class ClientDemoFrame extends JFrame {
 		return String.valueOf(pathBox.getSelectedItem());
 	}
 
+	/**
+     * Sends a single API request to the gateway server.
+     */
 	private void sendSingleRequest() {
 		ApiRequest request = createRequest();
 		ApiResponse response = routeRequest(request);
@@ -239,6 +262,10 @@ public class ClientDemoFrame extends JFrame {
 		remoteUpdateRemainingTokensTrigger();
 	}
 
+	/**
+     * Sends a burst of API requests to the gateway server.
+     * The number of requests and delay between them are determined by the user.
+     */
 	private void sendBurstRequests() {
 		int count = (int) burstSpinner.getValue();
 		int delay = (int) burstDelaySpinner.getValue();
@@ -323,6 +350,10 @@ public class ClientDemoFrame extends JFrame {
 		}.execute();
 	}
 
+	/**
+     * Creates an API request based on the user input or randomized values.
+     * @return The created ApiRequest object.
+     */
 	private ApiRequest createRequest() {
 		String clientId = getClientId();
 		String path = getSelectedPath();
@@ -343,12 +374,21 @@ public class ClientDemoFrame extends JFrame {
 		return new ApiRequest(clientId, path, method);
 	}
 
+	/**
+     * Routes the API request to the selected gateway node or uses round-robin routing.
+     *
+     * @param request The API request to route.
+     * @return The response from the gateway server.
+     */
 	private ApiResponse routeRequest(ApiRequest request) {
 		int selected = gatewayBox.getSelectedIndex();
 		if (selected == 0) return remoteSendRoundRobin(request);
 		return remoteSendToNode(request, selected - 1);
 	}
 
+	/**
+	 * retrieves the detailed tokens count and update the status bar in the GUI
+	 */
 	private void updateRemainingTokens() {
 		String currentClientId = clientField.getText();
 		String selectedPath = (String) pathBox.getSelectedItem();
@@ -362,6 +402,12 @@ public class ClientDemoFrame extends JFrame {
 		remainingLabel.setText("Remaining Tokens -> " + details);
 	}
 
+	/**
+	 * Retrieves the detailed breakdown of token counts from gateway server
+	 * @param clientId
+	 * @param path
+	 * @return
+	 */
 	private String remoteGetRemainingTokensDetailed(String clientId, String path) {
 		try {
 			if (socket != null && !socket.isClosed()) {
@@ -386,6 +432,11 @@ public class ClientDemoFrame extends JFrame {
 		log(output);
 	}
 
+	/**
+     * Logs a message to the local console log area.
+     *
+     * @param text The message to log.
+     */
 	public void log(String text) {
 		Color color = Color.BLACK;
 		if (text.contains("status=") && !text.contains("status=200")) {

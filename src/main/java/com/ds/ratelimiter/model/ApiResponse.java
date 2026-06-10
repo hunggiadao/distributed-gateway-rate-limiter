@@ -21,19 +21,9 @@ public class ApiResponse {
         this.remainingTokens = remainingTokens;
     }
 
-    public int getStatusCode() {
-        return statusCode;
-    }
-
-    public String getMessage() {
-        return message;
-    }
-
-    public String getGatewayName() {
-        return gatewayName;
-    }
-
-    public int getRemainingTokens() {
-        return remainingTokens;
-    }
+	// getter methods
+    public int getStatusCode() {return statusCode;}
+    public String getMessage() {return message;}
+    public String getGatewayName() {return gatewayName;}
+    public int getRemainingTokens() {return remainingTokens;}
 }
