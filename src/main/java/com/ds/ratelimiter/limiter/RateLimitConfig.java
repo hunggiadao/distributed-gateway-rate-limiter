@@ -1,5 +1,6 @@
 package com.ds.ratelimiter.limiter;
 
+// Service Level Agreement
 public class RateLimitConfig {
 	// token bucket
     private final boolean tokenBucketEnabled;

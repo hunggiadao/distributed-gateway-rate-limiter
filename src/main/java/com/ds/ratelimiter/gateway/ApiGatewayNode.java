@@ -25,7 +25,7 @@ import java.util.function.Function;
  */
 public class ApiGatewayNode {
     private final String name;
-    private final RateLimitStore rateLimitStore;
+    private final RateLimitStore rateLimitStore; // 
     private final Function<String, RateLimitConfig> configProvider; // CHANGED
     private final List<BackendService> backendServices;
 

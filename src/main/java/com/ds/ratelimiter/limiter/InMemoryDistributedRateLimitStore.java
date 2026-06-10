@@ -1,11 +1,11 @@
 package com.ds.ratelimiter.limiter;
 
 import com.ds.ratelimiter.model.RateLimitDecision;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class InMemoryDistributedRateLimitStore implements RateLimitStore {
-    private final Map<String, RateLimitState> buckets = new HashMap<>();
+    private final Map<String, RateLimitState> buckets = new ConcurrentHashMap<>();
     
     private long lastCurrentTimeMs = 0;
     private int totalRequestsThisMillisecond = 0;
@@ -26,32 +26,54 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
         boolean isPayment = path.startsWith("/payments");
 
         // --- GLOBAL SERVER LOAD SHEDDER ---
-        if (config.isLoadShedderEnabled()) {
-            if (totalRequestsThisMillisecond >= config.getServerMaxRatePerMs()) {
-                // The server is technically fully loaded! 
+        // if (config.isLoadShedderEnabled()) {
+        //     if (totalRequestsThisMillisecond >= config.getServerMaxRatePerMs()) {
+        //         // The server is technically fully loaded! 
                 
-                if (isPayment) {
-                    // Calculate what percentage of the current CPU load is dedicated to payments
-                    double currentPaymentRatio = totalRequestsThisMillisecond == 0 ? 0 
-                            : ((double) paymentRequestsThisMillisecond / totalRequestsThisMillisecond) * 100.0;
+        //         if (isPayment) {
+        //             // Calculate what percentage of the current CPU load is dedicated to payments
+        //             double currentPaymentRatio = totalRequestsThisMillisecond == 0 ? 0 
+        //                     : ((double) paymentRequestsThisMillisecond / totalRequestsThisMillisecond) * 100.0;
                     
-                    // If payments are being starved (below their minimum threshold), force the request through
-                    if (currentPaymentRatio < config.getPaymentsMinPercentage()) {
-                        paymentRequestsThisMillisecond++;
-                        totalRequestsThisMillisecond++;
-                    } else {
-                        // Payments have met their quota, drop to protect the server
-                        return new RateLimitDecision(false, 0, "Server overloaded. Priority quota met.");
-                    }
-                } else {
-                    // Non-priority requests are immediately dropped when the server is full
-                    return new RateLimitDecision(false, 0, "Server overloaded.");
-                }
-            } else {
-                // Server is under the limit, so ALL path types freely share the capacity
-                totalRequestsThisMillisecond++;
-                if (isPayment) {
-                    paymentRequestsThisMillisecond++;
+        //             // If payments are being starved (below their minimum threshold), force the request through
+        //             if (currentPaymentRatio < config.getPaymentsMinPercentage()) {
+        //                 paymentRequestsThisMillisecond++;
+        //                 totalRequestsThisMillisecond++;
+        //             } else {
+        //                 // Payments have met their quota, drop to protect the server
+        //                 return new RateLimitDecision(false, 0, "Server overloaded. Priority quota met.");
+        //             }
+        //         } else {
+        //             // Non-priority requests are immediately dropped when the server is full
+        //             return new RateLimitDecision(false, 0, "Server overloaded.");
+        //         }
+        //     } else {
+        //         // Server is under the limit, so ALL path types freely share the capacity
+        //         totalRequestsThisMillisecond++;
+        //         if (isPayment) {
+        //             paymentRequestsThisMillisecond++;
+        //         }
+        //     }
+        // }
+		// --- GLOBAL SERVER LOAD SHEDDER (PREEMPTIVE APPROACH) ---
+        if (config.isLoadShedderEnabled()) {
+            int maxRate = config.getServerMaxRatePerMs();
+            
+            // 1. Check absolute server threshold (Applies to ALL traffic)
+            if (totalRequestsThisMillisecond >= maxRate) {
+                return new RateLimitDecision(false, 0, "Server overloaded. Max rate reached.");
+            }
+            
+            // 2. Preemptive shedding for non-priority traffic
+            if (!isPayment) {
+                // Calculate the max threshold for non-payment requests
+                double minPayRatio = config.getPaymentsMinPercentage() / 100.0;
+                int maxNonPayment = (int) (maxRate * (1.0 - minPayRatio));
+                int currentNonPayment = totalRequestsThisMillisecond - paymentRequestsThisMillisecond;
+                
+                // If non-payments have hit their ceiling, drop them so the remaining slots are saved for payments
+                if (currentNonPayment >= maxNonPayment) {
+                    return new RateLimitDecision(false, 0, "Server preemptively shedding non-payment traffic.");
                 }
             }
         }
@@ -162,7 +184,7 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
 
     @Override
     public synchronized int getRemainingTokens(String key, RateLimitConfig config) {
-        String path = key.contains("|") ? key.split("\\|")[1] : "/users";
+        // String path = key.contains("|") ? key.split("\\|")[1] : "/users";
         String clientId = key.contains("|") ? key.split("\\|")[0] : key;
         long now = System.currentTimeMillis();
         int minTokens = Integer.MAX_VALUE;
@@ -170,7 +192,6 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
 
         if (config.isTokenBucketEnabled()) {
             anyEnabled = true;
-            // Changed from (clientId + ":" + path + ":tb") to match consume()
             RateLimitState tb = buckets.get(clientId + ":token");
             if (tb != null) {
                 long elapsed = now - tb.getLastRefillTimeMillis();
@@ -183,7 +204,6 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
         }
         if (config.isFixedWindowEnabled()) {
             anyEnabled = true;
-            // Changed from (clientId + ":" + path + ":fixed") to match consume()
             RateLimitState fw = buckets.get(clientId + ":fixed");
             if (fw != null) {
                 long elapsed = now - fw.getLastRefillTimeMillis();
@@ -213,7 +233,7 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
         }
 		
 		if (!anyEnabled) return 0;
-		return minTokens == Double.MAX_VALUE ? 0 : (int) Math.floor(minTokens);
+		return minTokens == Integer.MAX_VALUE ? 0 : minTokens;
     }
 
 	@Override
@@ -224,7 +244,6 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
         StringBuilder sb = new StringBuilder();
 
         if (config.isTokenBucketEnabled()) {
-            // FIX: Changed from ":token_bucket" to ":token" to match consume()
             RateLimitState tb = buckets.get(clientId + ":token");
             int tbVal;
             if (tb != null) {
@@ -239,7 +258,6 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
         }
 
         if (config.isFixedWindowEnabled()) {
-            // FIX: Changed from ":fixed_window" to ":fixed" to match consume()
             RateLimitState fw = buckets.get(clientId + ":fixed");
             int fwVal;
             if (fw != null) {
@@ -252,7 +270,6 @@ public class InMemoryDistributedRateLimitStore implements RateLimitStore {
         }
 
         if (config.isSlidingWindowEnabled()) {
-            // This one was already correct in previous logic, but included here for completeness
             RateLimitState sw = buckets.get(clientId + ":sliding");
             int swVal;
             if (sw != null) {

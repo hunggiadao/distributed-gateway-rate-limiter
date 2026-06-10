@@ -11,7 +11,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class GatewayCluster {
     private final RateLimitStore sharedStore;
-    // private final RateLimitConfig rateLimitConfig;
     private final List<ApiGatewayNode> nodes;
     private int roundRobinIndex = 0;
 	// NEW: Config Management
