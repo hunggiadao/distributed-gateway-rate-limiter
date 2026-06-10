@@ -2,6 +2,8 @@ package com.ds.ratelimiter.gui;
 
 import com.ds.ratelimiter.gateway.GatewayCluster;
 import com.ds.ratelimiter.limiter.RateLimitConfig;
+import com.ds.ratelimiter.model.ApiRequest;
+import com.ds.ratelimiter.model.ApiResponse;
 
 import javax.swing.*;
 import java.awt.BorderLayout;
@@ -201,8 +203,8 @@ public class GatewayDemoFrame extends JFrame {
                     String path = in.readUTF();
                     String method = in.readUTF();
                     
-                    com.ds.ratelimiter.model.ApiRequest request = new com.ds.ratelimiter.model.ApiRequest(clientId, path, method);
-                    com.ds.ratelimiter.model.ApiResponse response = cluster.sendRoundRobin(request);
+                    ApiRequest request = new ApiRequest(clientId, path, method);
+                    ApiResponse response = cluster.sendRoundRobin(request);
                     
                     out.writeInt(response.getStatusCode());
                     out.writeUTF(response.getMessage());
@@ -215,8 +217,8 @@ public class GatewayDemoFrame extends JFrame {
                     String method = in.readUTF();
                     int nodeIndex = in.readInt();
                     
-                    com.ds.ratelimiter.model.ApiRequest request = new com.ds.ratelimiter.model.ApiRequest(clientId, path, method);
-                    com.ds.ratelimiter.model.ApiResponse response = cluster.sendToNode(request, nodeIndex);
+                    ApiRequest request = new ApiRequest(clientId, path, method);
+                    ApiResponse response = cluster.sendToNode(request, nodeIndex);
                     
                     out.writeInt(response.getStatusCode());
                     out.writeUTF(response.getMessage());
