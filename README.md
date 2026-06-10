@@ -1,6 +1,6 @@
 # Distributed Rate Limiter and API Gateway Demo
 
-This is a Java Maven project that demonstrates the core idea of a **Distributed Rate Limiter** combined with an **API Gateway**. The demo uses a simple **Swing GUI** so you can visually test request routing, rate limiting, and backend service selection.
+This is a Java Maven project that demonstrates the core idea of a **Distributed Rate Limiter** implemented in multiple distributed **API Gateways**. The demo uses a simple **Swing GUI** so you can visually test request routing, rate limiting, and backend service selection.
 
 ## 1. Project Goal
 
@@ -9,13 +9,81 @@ The goal is to show how multiple API Gateway nodes can share the same rate limit
 In this demo:
 
 ```text
-Client
-  ↓
-API Gateway Cluster
-  ↓
-Shared Distributed Rate Limit Store
-  ↓
-Backend Services
+┌───────────────────────────────────────────────────────────┐
+│                     ClientDemoFrame                       │
+│ - Configures Path, Method, and Target Client ID           │
+│ - Generates ApiRequest (UUID, ClientID, Path, Method)     │
+└─────────────────────────────┬─────────────────────────────┘
+                              │
+                              ▼
+            ╭──────────────────────────────────╮
+            │ [TCP Packet: Raw ApiRequest Data]│
+            ╰──────────────────────────────────╯
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────┐
+│              GatewayCluster (Load Balancer)               │
+│ - Reconstructs ApiRequest from raw TCP stream             │
+│ - Routes traffic via Round-Robin or Direct Node Match     │
+└─────────────────────────────┬─────────────────────────────┘
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+│ GatewayNode1 │      │ GatewayNode2 │      │ GatewayNode3 │
+│ - Get Config │      │ - Get Config │      │ - Get Config │
+│ - Call Redis │      │ - Call Redis │      │ - Call Redis │
+└───────┬──────┘      └───────┬──────┘      └───────┬──────┘
+        └─────────────────────┼─────────────────────┘
+                              │
+                              ▼
+            ╭──────────────────────────────────╮
+            │ [Query: consume(key, config)]    │
+            ╰──────────────────────────────────╯
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────┐
+│     InMemoryDistributedRateLimitStore (Redis Service)     │
+│                                                           │
+│ 1. Preemptive Load Shedding (Drop server over-capacity)   │
+│ 2. Evaluate User Algos (Fixed, Sliding, Token Bucket)     │
+│ 3. Commit State (Deduct tokens universally if allowed)    │
+│ 4. Return RateLimitDecision (Allowed or Rejected)         │
+└─────────────────────────────┬─────────────────────────────┘
+                              │
+                              ▼
+                  [ Is Request Allowed? ]
+                 /                       \
+             [NO]                         [YES]
+              │                             │
+              ▼                             ▼
+┌───────────────────────────┐ ┌─────────────────────────────┐
+│     Return Status 429     │ │    Backend Path Routing     │
+│    (Too Many Requests)    │ │                             │
+└─────────────┬─────────────┘ │ - /users    ──> UserService │
+              │               │ - /orders   ──> OrderService│
+              │               │ - /payments ──> PaymentSvc  │
+              │               │ - <unknown> ──> 404         │
+              │               └─────────────┬───────────────┘
+              │                             │
+              │                             ▼
+              │               ┌─────────────────────────────┐
+              │               │      Return Status 200      │
+              │               │    (Handled By Backend)     │
+              │               └─────────────┬───────────────┘
+              └───────────────┬─────────────┘
+                              │
+                              ▼
+            ╭──────────────────────────────────╮
+            │ [TCP Packet: Raw ApiResponse]    │
+            ╰──────────────────────────────────╯
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────┐
+│             GatewayCluster ──> ClientDemoFrame            │
+│ - Flushes ApiResponse back via TCP stream                 │
+│ - Client UI renders color-coded logs & updates token UI   │
+└───────────────────────────────────────────────────────────┘
 ```
 
 The project simulates three API Gateway nodes:
@@ -52,86 +120,73 @@ A distributed rate limiter controls how many requests a client can send across a
 
 The important idea is that all gateway nodes share the same rate limit state. Therefore, a client cannot avoid the limit by changing from Gateway-1 to Gateway-2.
 
-### Token Bucket Algorithm
-
-This project uses the token bucket algorithm.
-
-- Each client has a bucket.
-- The bucket starts full.
-- Each allowed request consumes one token.
-- Tokens are refilled over time.
-- If the bucket has no tokens, the request is rejected.
-
-Example:
-
-```text
-Bucket capacity = 5
-Refill rate = 1 token/second
-```
-
-This means the client can send a burst of 5 requests immediately. After that, the client must wait for tokens to refill.
-
 ## 4. Project Structure
 
 ```text
 distributed-rate-limiter-gateway/
 ├── pom.xml
 ├── README.md
-└── src/
-    └── main/
-        └── java/
-            └── com/
-                └── ds/
-                    └── ratelimiter/
-                        ├── Main.java
-                        ├── backend/
-                        │   ├── BackendService.java
-                        │   ├── UserService.java
-                        │   ├── OrderService.java
-                        │   └── PaymentService.java
-                        ├── gateway/
-                        │   ├── ApiGatewayNode.java
-                        │   └── GatewayCluster.java
-                        ├── gui/
-                        │   └── GatewayDemoFrame.java
-                        ├── limiter/
-                        │   ├── RateLimitConfig.java
-                        │   ├── RateLimitStore.java
-                        │   ├── InMemoryDistributedRateLimitStore.java
-                        │   └── TokenBucket.java
-                        └── model/
-                            ├── ApiRequest.java
-                            ├── ApiResponse.java
-                            └── RateLimitDecision.java
+└── src/main/java/com/ds/ratelimiter/
+                         ├── Main.java
+                         ├── backend/
+                         │   ├── BackendService.java
+                         │   ├── UserService.java
+                         │   ├── OrderService.java
+                         │   └── PaymentService.java
+                         ├── gateway/
+                         │   ├── ApiGatewayNode.java
+                         │   └── GatewayCluster.java
+                         ├── gui/
+                         │   ├── GatewayDemoFrame.java
+                         │   └── ClientDemoFrame.java
+                         ├── limiter/
+                         │   ├── RateLimitConfig.java
+                         │   ├── RateLimitStore.java
+                         │   ├── InMemoryDistributedRateLimitStore.java
+                         │   └── RateLimitState.java
+                         └── model/
+                             ├── ApiRequest.java
+                             ├── ApiResponse.java
+                             └── RateLimitDecision.java
 ```
 
 ## 5. Important Classes
 
 ### `Main.java`
 
-Starts the Swing GUI.
+Starts GatewayDemo and ClientDemo GUIs.
 
-### `GatewayDemoFrame.java`
+### `ClientDemoFrame.java`
 
-The main graphical interface. It lets you:
+The main client-side GUI. It lets you:
 
 - Choose a client ID.
 - Choose an HTTP method.
 - Choose an API path.
 - Choose a gateway node or round-robin routing.
-- Configure bucket capacity.
-- Configure refill rate.
 - Send one request.
 - Send a burst of requests.
+- View live request logs.
+- View remaining tokens.
+
+### `GatewayDemoFrame.java`
+
+The main Cluster graphical interface. It lets you:
+
+- Configure token bucket capacity, refill rate.
+- Configure fixed window length, limit.
+- Configure sliding window length, limit.
+- Configure fleet load shedder settings.
 - View live request logs.
 
 ### `GatewayCluster.java`
 
-Creates the full gateway cluster. It contains:
+Simulates a load balancer. It contains:
 
 - Three gateway nodes.
 - One shared rate limit store.
 - Backend services.
+- Configs for server and clients (SLAs)
 
 This is the class that demonstrates the distributed idea because all gateway nodes receive the same shared store.
 
@@ -141,7 +196,7 @@ Represents one gateway node. Its workflow is:
 
 ```text
 Receive request
-→ Check rate limiter
+→ Consult rate limiter from shared store
 → If blocked, return 429
 → If allowed, route to backend service
 → Return backend response
@@ -151,21 +206,11 @@ Receive request
 
 Simulates a shared distributed store like Redis.
 
-It stores token buckets in a map:
-
-```text
-client ID → token bucket
-```
-
 The methods are synchronized to keep token updates safe when many requests are sent quickly.
-
-### `TokenBucket.java`
-
-Stores the token count and last refill time for one client.
 
 ### Backend Services
 
-The project has three fake backend services:
+The project has three mockup backend services:
 
 ```text
 /users     → UserService
@@ -188,16 +233,22 @@ The Swing GUI should open.
 
 ## 7. How to Run Using Terminal
 
-Open a terminal inside the project folder and run:
+To rebuild the project, run:
 
 ```bash
-mvn clean package
+mvn clean compile package
 ```
 
-Then run the generated JAR:
+Then run the generated JAR with the Main class:
 
 ```bash
-java -jar target/distributed-rate-limiter-gateway-1.0.0.jar
+java -cp target/distributed-rate-limiter-gateway-1.0.0.jar "com.ds.ratelimiter.Main"
+```
+
+or
+
+```bash
+java -cp target/classes "com.ds.ratelimiter.Main"
 ```
 
 ## 8. How to Demo the Project
