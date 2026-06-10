@@ -12,11 +12,11 @@ import java.util.UUID;
  * - method could be GET, POST, PUT, DELETE, etc.
  */
 public class ApiRequest {
-    private final String requestId;
+    private final String requestId; // automated
     private final String clientId;
     private final String path;
     private final String method;
-    private final LocalDateTime createdAt;
+    private final LocalDateTime createdAt; // automated
 
     public ApiRequest(String clientId, String path, String method) {
         // Short random ID makes each request easy to identify in the GUI log.
@@ -27,23 +27,10 @@ public class ApiRequest {
         this.createdAt = LocalDateTime.now();
     }
 
-    public String getRequestId() {
-        return requestId;
-    }
-
-    public String getClientId() {
-        return clientId;
-    }
-
-    public String getPath() {
-        return path;
-    }
-
-    public String getMethod() {
-        return method;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
+	// getter methods
+    public String getRequestId() { return requestId; }
+    public String getClientId() { return clientId; }
+    public String getPath() { return path; }
+    public String getMethod() { return method; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
 }

@@ -17,15 +17,8 @@ public class RateLimitDecision {
         this.reason = reason;
     }
 
-    public boolean isAllowed() {
-        return allowed;
-    }
-
-    public int getRemainingTokens() {
-        return remainingTokens;
-    }
-
-    public String getReason() {
-        return reason;
-    }
+	// getter methods
+    public boolean isAllowed() {return allowed;}
+    public int getRemainingTokens() {return remainingTokens;}
+    public String getReason() {return reason;}
 }

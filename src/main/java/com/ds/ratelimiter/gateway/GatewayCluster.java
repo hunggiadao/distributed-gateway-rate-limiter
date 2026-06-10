@@ -9,9 +9,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * The GatewayCluster class represents a cluster of API gateway nodes that manage
+ * rate limiting for incoming API requests. It provides centralized configuration
+ * management, dynamic client-specific rate limiting, and a round-robin request
+ * distribution mechanism.
+ */
 public class GatewayCluster {
-    private final RateLimitStore sharedStore;
-    private final List<ApiGatewayNode> nodes;
+    private final RateLimitStore sharedStore; // shared Redis
+    private final List<ApiGatewayNode> nodes; // list of gateways
     private int roundRobinIndex = 0;
 	// NEW: Config Management
     private RateLimitConfig defaultConfig;
@@ -90,12 +96,25 @@ public class GatewayCluster {
         }
     }
 
+	/**
+     * Sends an API request to the next gateway node in a round-robin fashion.
+     *
+     * @param request The API request to be processed.
+     * @return The response from the gateway node.
+     */
     public synchronized ApiResponse sendRoundRobin(ApiRequest request) {
         ApiGatewayNode node = nodes.get(roundRobinIndex);
         roundRobinIndex = (roundRobinIndex + 1) % nodes.size();
         return node.handle(request);
     }
 
+	/**
+     * Sends an API request to a specific gateway node by index.
+     *
+     * @param request The API request to be processed.
+     * @param nodeIndex The index of the target gateway node.
+     * @return The response from the gateway node.
+     */
     public ApiResponse sendToNode(ApiRequest request, int nodeIndex) {
         return nodes.get(nodeIndex).handle(request);
     }
@@ -105,10 +124,20 @@ public class GatewayCluster {
         return sharedStore.getRemainingTokens(clientId + "|" + path, getConfig(clientId));
     }
 
+	/**
+     * Retrieves detailed information about the remaining tokens for a specific client and API path.
+     *
+     * @param clientId The ID of the client.
+     * @param path The API path.
+     * @return Detailed information about the remaining tokens.
+     */
 	public String getRemainingTokensDetailed(String clientId, String path) {
         return sharedStore.getRemainingTokensDetailed(clientId + "|" + path, getConfig(clientId));
     }
 
+	/**
+     * Resets the rate limiter by clearing all stored tokens and configurations.
+     */
     public void resetLimiter() {
         sharedStore.reset();
     }
