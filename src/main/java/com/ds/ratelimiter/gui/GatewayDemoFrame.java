@@ -14,6 +14,9 @@ import java.awt.GridLayout;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.net.*;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 /**
  * The GatewayDemoFrame class represents the GUI for the distributed API gateway and rate limiter.
@@ -25,20 +28,20 @@ public class GatewayDemoFrame extends JFrame {
     // private ClientDemoFrame clientFrame; // Only used when running single process mode
 
     private final JCheckBox chkTokenBucket = new JCheckBox("Token Bucket", false);
-    private final JSpinner tbCapacitySpinner = new JSpinner(new SpinnerNumberModel(10, 1, 1000000, 1));
-    private final JSpinner tbRefillSpinner = new JSpinner(new SpinnerNumberModel(1.0, 0.1, 1000000.0, 1.0));
+    private final JSpinner tbCapacitySpinner = new JSpinner(new SpinnerNumberModel(1000, 1, 1000000, 1));
+    private final JSpinner tbRefillSpinner = new JSpinner(new SpinnerNumberModel(100.0, 0.1, 1000000.0, 1.0));
 
     private final JCheckBox chkFixedWindow = new JCheckBox("Fixed Window", false);
     private final JSpinner fwLengthSpinner = new JSpinner(new SpinnerNumberModel(1000, 100, 100000, 100));
-    private final JSpinner fwLimitSpinner = new JSpinner(new SpinnerNumberModel(10, 1, 1000000, 10));
+    private final JSpinner fwLimitSpinner = new JSpinner(new SpinnerNumberModel(1000, 1, 1000000, 10));
 
     private final JCheckBox chkSlidingWindow = new JCheckBox("Sliding Window", false);
     private final JSpinner swLengthSpinner = new JSpinner(new SpinnerNumberModel(1000, 100, 100000, 100));
-    private final JSpinner swLimitSpinner = new JSpinner(new SpinnerNumberModel(10, 1, 1000000, 10));
+    private final JSpinner swLimitSpinner = new JSpinner(new SpinnerNumberModel(1000, 1, 1000000, 10));
 
     private final JCheckBox chkLoadShedder = new JCheckBox("Fleet Load Shedder", false);
     private final JSpinner lsPaymentsSpinner = new JSpinner(new SpinnerNumberModel(25.0, 0.0, 100.0, 5.0));
-    private final JSpinner serverMaxRateSpinner = new JSpinner(new SpinnerNumberModel(5, 1, 1000, 1));
+    private final JSpinner serverMaxRateSpinner = new JSpinner(new SpinnerNumberModel(10, 1, 1000, 1));
 
     private final JLabel remainingLabel = new JLabel("Remaining Tokens -> -");
     private final JTextPane logArea = new JTextPane();
@@ -156,13 +159,13 @@ public class GatewayDemoFrame extends JFrame {
 			int port = 12345;
             try (ServerSocket serverSocket = new ServerSocket(port)) {
 				// CRITICAL: Set the reuse option BEFORE binding
-				if (serverSocket.supportedOptions().contains(StandardSocketOptions.SO_REUSEPORT)) {
-					// can only toggle SO_REUSEPORT on Linux
-					serverSocket.setOption(StandardSocketOptions.SO_REUSEPORT, true);
-				}
-				// on Windows, skip, cannot do that
+				// if (serverSocket.supportedOptions().contains(StandardSocketOptions.SO_REUSEPORT)) {
+				// 	// can only toggle SO_REUSEPORT on Linux
+				// 	serverSocket.setOption(StandardSocketOptions.SO_REUSEPORT, true);
+				// }
+				// // on Windows, skip, cannot do that
 
-				serverSocket.bind(new InetSocketAddress(port));
+				// serverSocket.bind(new InetSocketAddress(port));
 
                 while (true) {
                     Socket clientSocket = serverSocket.accept();
@@ -283,7 +286,17 @@ public class GatewayDemoFrame extends JFrame {
         }
         
         if (cluster != null) {
-            remainingLabel.setText("Remaining Tokens -> " + cluster.getRemainingTokensDetailed(clientId, inspectionPath));
+			// show minTokens of all clients
+            StringBuilder sb = new StringBuilder("Min Tokens -> ");
+			for (int i = 0; i < targetClientBox.getItemCount(); i++) {
+				String client = targetClientBox.getItemAt(i);
+				if ("All Clients".equalsIgnoreCase(client)) continue;
+		
+				int minTokens = cluster.getRemainingTokens(client, inspectionPath);
+				sb.append(client + ": " + minTokens + " ");
+			}
+            // remainingLabel.setText("Remaining Tokens -> " + cluster.getRemainingTokensDetailed(clientId, inspectionPath));
+			remainingLabel.setText(sb.toString());
         }
     }
 
