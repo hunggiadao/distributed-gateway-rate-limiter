@@ -34,7 +34,7 @@ public class Main {
 				new ProcessBuilder(javaBin, "-cp", classpath, className, "client", "client-1", "10", "10").start();
 				new ProcessBuilder(javaBin, "-cp", classpath, className, "client", "client-2", "10", "320").start();
 				new ProcessBuilder(javaBin, "-cp", classpath, className, "client", "client-3", "10", "630").start();
-				new ProcessBuilder(javaBin, "-cp", classpath, className, "client", "client-4", "770", "10").start();
+				// new ProcessBuilder(javaBin, "-cp", classpath, className, "client", "client-4", "770", "10").start();
 
 			} catch (Exception e) {
 				e.printStackTrace();

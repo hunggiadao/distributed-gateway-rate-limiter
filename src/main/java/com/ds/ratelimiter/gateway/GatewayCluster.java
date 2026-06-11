@@ -7,6 +7,7 @@ import com.ds.ratelimiter.model.ApiResponse;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -141,4 +142,8 @@ public class GatewayCluster {
     public void resetLimiter() {
         sharedStore.reset();
     }
+
+	public Set<String> getClientIds() {
+		return clientConfigs.keySet();
+	}
 }
