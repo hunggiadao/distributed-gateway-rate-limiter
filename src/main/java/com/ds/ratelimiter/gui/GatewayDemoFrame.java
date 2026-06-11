@@ -41,7 +41,7 @@ public class GatewayDemoFrame extends JFrame {
 
     private final JCheckBox chkLoadShedder = new JCheckBox("Fleet Load Shedder", false);
     private final JSpinner lsPaymentsSpinner = new JSpinner(new SpinnerNumberModel(25.0, 0.0, 100.0, 5.0));
-    private final JSpinner serverMaxRateSpinner = new JSpinner(new SpinnerNumberModel(10, 1, 1000, 1));
+    private final JSpinner serverMaxRateSpinner = new JSpinner(new SpinnerNumberModel(5, 1, 1000, 1));
 
     private final JLabel remainingLabel = new JLabel("Remaining Tokens -> -");
     private final JTextPane logArea = new JTextPane();
