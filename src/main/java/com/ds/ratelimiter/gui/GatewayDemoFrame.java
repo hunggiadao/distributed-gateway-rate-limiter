@@ -14,9 +14,10 @@ import java.awt.GridLayout;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.net.*;
-import java.util.Set;
-import java.util.SortedSet;
-import java.util.TreeSet;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.util.Properties;
 
 /**
  * The GatewayDemoFrame class represents the GUI for the distributed API gateway and rate limiter.
@@ -25,19 +26,19 @@ import java.util.TreeSet;
  */
 public class GatewayDemoFrame extends JFrame {
     private GatewayCluster cluster;
-    // private ClientDemoFrame clientFrame; // Only used when running single process mode
 
+    // Restored Original Default Values
     private final JCheckBox chkTokenBucket = new JCheckBox("Token Bucket", false);
     private final JSpinner tbCapacitySpinner = new JSpinner(new SpinnerNumberModel(1000, 1, 1000000, 1));
     private final JSpinner tbRefillSpinner = new JSpinner(new SpinnerNumberModel(100.0, 0.1, 1000000.0, 1.0));
 
     private final JCheckBox chkFixedWindow = new JCheckBox("Fixed Window", false);
     private final JSpinner fwLengthSpinner = new JSpinner(new SpinnerNumberModel(1000, 100, 100000, 100));
-    private final JSpinner fwLimitSpinner = new JSpinner(new SpinnerNumberModel(1000, 1, 1000000, 10));
+    private final JSpinner fwLimitSpinner = new JSpinner(new SpinnerNumberModel(10, 1, 1000000, 10));
 
     private final JCheckBox chkSlidingWindow = new JCheckBox("Sliding Window", false);
     private final JSpinner swLengthSpinner = new JSpinner(new SpinnerNumberModel(1000, 100, 100000, 100));
-    private final JSpinner swLimitSpinner = new JSpinner(new SpinnerNumberModel(1000, 1, 1000000, 10));
+    private final JSpinner swLimitSpinner = new JSpinner(new SpinnerNumberModel(10, 1, 1000000, 10));
 
     private final JCheckBox chkLoadShedder = new JCheckBox("Fleet Load Shedder", false);
     private final JSpinner lsPaymentsSpinner = new JSpinner(new SpinnerNumberModel(25.0, 0.0, 100.0, 5.0));
@@ -52,26 +53,27 @@ public class GatewayDemoFrame extends JFrame {
     private final JButton tokensButton = new JButton("Inspect DB State");
     private final JComboBox<String> targetClientBox = new JComboBox<>(new String[]{"All Clients"});
 
-    // Cached values to safely serve decoupled multi-process statuses
     private String lastRemoteClientId = "client-1";
     private String lastRemotePath = "/users";
+    
+    private final String STATE_FILE = "gateway_state.properties";
 
-	/**
-     * Constructs the GatewayDemoFrame GUI.
-     * Initializes the gateway cluster, sets up the GUI layout, and starts the TCP server.
-     */
     public GatewayDemoFrame() {
         setTitle("Distributed API Gateway Engine & Rate Limiter Dashboard");
         setSize(900, 680);
         setLocation(770, 320);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
-        applyTokenButton.addActionListener(e -> resetCluster());
-        applyLoadShedderButton.addActionListener(e -> resetCluster());
+        applyTokenButton.addActionListener(e -> resetClusterFromUI());
+        applyLoadShedderButton.addActionListener(e -> resetClusterFromUI());
         clearButton.addActionListener(e -> logArea.setText(""));
         tokensButton.addActionListener(e -> updateRemainingTokens());
 
-        resetCluster();
+        // 1. Load any saved settings from a previous crash/instance before applying to cluster
+        loadState();
+        
+        // 2. Initialize cluster with the loaded/default config
+        resetClusterFromUI();
 
         add(createTopPanel(), BorderLayout.NORTH);
         add(createLogPanel(), BorderLayout.CENTER);
@@ -80,13 +82,169 @@ public class GatewayDemoFrame extends JFrame {
         logArea.setEditable(false);
         log("Gateway Core Cluster active. Waiting for client program traffic incoming streams...");
 
-        startTCPServer();
+        startTcpServer();
 
         javax.swing.Timer autoRefreshTimer = new javax.swing.Timer(100, e -> updateRemainingTokens());
         autoRefreshTimer.start();
     }
 
-	private JPanel createTopPanel() {
+    private void saveState() {
+        try {
+            Properties props = new Properties();
+            props.setProperty("tbEnabled", String.valueOf(chkTokenBucket.isSelected()));
+            props.setProperty("tbCap", String.valueOf(tbCapacitySpinner.getValue()));
+            props.setProperty("tbRefill", String.valueOf(tbRefillSpinner.getValue()));
+            
+            props.setProperty("fwEnabled", String.valueOf(chkFixedWindow.isSelected()));
+            props.setProperty("fwLen", String.valueOf(fwLengthSpinner.getValue()));
+            props.setProperty("fwLim", String.valueOf(fwLimitSpinner.getValue()));
+            
+            props.setProperty("swEnabled", String.valueOf(chkSlidingWindow.isSelected()));
+            props.setProperty("swLen", String.valueOf(swLengthSpinner.getValue()));
+            props.setProperty("swLim", String.valueOf(swLimitSpinner.getValue()));
+            
+            props.setProperty("lsEnabled", String.valueOf(chkLoadShedder.isSelected()));
+            props.setProperty("lsMin", String.valueOf(lsPaymentsSpinner.getValue()));
+            props.setProperty("lsMax", String.valueOf(serverMaxRateSpinner.getValue()));
+            
+            try (FileOutputStream out = new FileOutputStream(STATE_FILE)) {
+                props.store(out, "Gateway Cluster Configuration State (Auto-Restored on boot)");
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void loadState() {
+        try {
+            File file = new File(STATE_FILE);
+            if (!file.exists()) return; // First time run, use defaults
+            
+            Properties props = new Properties();
+            try (FileInputStream in = new FileInputStream(file)) {
+                props.load(in);
+            }
+            
+            if (props.containsKey("tbEnabled")) chkTokenBucket.setSelected(Boolean.parseBoolean(props.getProperty("tbEnabled")));
+            if (props.containsKey("tbCap")) tbCapacitySpinner.setValue(Integer.parseInt(props.getProperty("tbCap")));
+            if (props.containsKey("tbRefill")) tbRefillSpinner.setValue(Double.parseDouble(props.getProperty("tbRefill")));
+            
+            if (props.containsKey("fwEnabled")) chkFixedWindow.setSelected(Boolean.parseBoolean(props.getProperty("fwEnabled")));
+            if (props.containsKey("fwLen")) fwLengthSpinner.setValue(Long.parseLong(props.getProperty("fwLen")));
+            if (props.containsKey("fwLim")) fwLimitSpinner.setValue(Integer.parseInt(props.getProperty("fwLim")));
+            
+            if (props.containsKey("swEnabled")) chkSlidingWindow.setSelected(Boolean.parseBoolean(props.getProperty("swEnabled")));
+            if (props.containsKey("swLen")) swLengthSpinner.setValue(Long.parseLong(props.getProperty("swLen")));
+            if (props.containsKey("swLim")) swLimitSpinner.setValue(Integer.parseInt(props.getProperty("swLim")));
+            
+            if (props.containsKey("lsEnabled")) chkLoadShedder.setSelected(Boolean.parseBoolean(props.getProperty("lsEnabled")));
+            if (props.containsKey("lsMin")) lsPaymentsSpinner.setValue(Double.parseDouble(props.getProperty("lsMin")));
+            if (props.containsKey("lsMax")) serverMaxRateSpinner.setValue(Integer.parseInt(props.getProperty("lsMax")));
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void startTcpServer() {
+        new Thread(() -> {
+            try (ServerSocket serverSocket = new ServerSocket(12345)) {
+				// CRITICAL: Set the reuse option BEFORE binding
+				// if (serverSocket.supportedOptions().contains(StandardSocketOptions.SO_REUSEPORT)) {
+				// 	// can only toggle SO_REUSEPORT on Linux
+				// 	serverSocket.setOption(StandardSocketOptions.SO_REUSEPORT, true);
+				// }
+				// // on Windows, skip, cannot do that
+
+				// serverSocket.bind(new InetSocketAddress(port));
+
+                while (true) {
+                    Socket clientSocket = serverSocket.accept();
+                    new Thread(() -> handleTcpClientConnection(clientSocket)).start();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
+    private void handleTcpClientConnection(Socket socket) {
+        try (DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+             DataInputStream in = new DataInputStream(socket.getInputStream())) {
+            
+            while (true) {
+                String cmd = in.readUTF();
+                if ("REGISTER".equals(cmd)) {
+                    String clientId = in.readUTF();
+                    registerClientInUI(clientId);
+                } else if ("LOG".equals(cmd)) {
+                    String text = in.readUTF();
+                    SwingUtilities.invokeLater(() -> log(text));
+                } else if ("UPDATE_STATUS".equals(cmd)) {
+                    String clientId = in.readUTF();
+                    String path = in.readUTF();
+                    lastRemoteClientId = clientId;
+                    lastRemotePath = path;
+                } else if ("SEND_ROUND_ROBIN".equals(cmd)) {
+                    String clientId = in.readUTF();
+                    String path = in.readUTF();
+                    String method = in.readUTF();
+                    
+                    registerClientInUI(clientId);
+                    ApiRequest request = new ApiRequest(clientId, path, method);
+                    ApiResponse response = cluster.sendRoundRobin(request);
+                    
+                    out.writeInt(response.getStatusCode());
+                    out.writeUTF(response.getMessage());
+                    out.writeUTF(response.getGatewayName());
+                    out.writeInt(response.getRemainingTokens());
+                    out.flush();
+                } else if ("SEND_TO_NODE".equals(cmd)) {
+                    String clientId = in.readUTF();
+                    String path = in.readUTF();
+                    String method = in.readUTF();
+                    int nodeIndex = in.readInt();
+                    
+                    registerClientInUI(clientId);
+                    ApiRequest request = new ApiRequest(clientId, path, method);
+                    ApiResponse response = cluster.sendToNode(request, nodeIndex);
+                    
+                    out.writeInt(response.getStatusCode());
+                    out.writeUTF(response.getMessage());
+                    out.writeUTF(response.getGatewayName());
+                    out.writeInt(response.getRemainingTokens());
+                    out.flush();
+                } else if ("GET_REMAINING_TOKENS".equals(cmd)) {
+                    String clientId = in.readUTF();
+                    String path = in.readUTF();
+                    String details = cluster != null ? cluster.getRemainingTokensDetailed(clientId, path) : "Cluster offline";
+                    out.writeUTF(details);
+                    out.flush();
+                } else if ("UPDATE_REMAINING_TOKENS_TRIGGER".equals(cmd)) {
+                    SwingUtilities.invokeLater(() -> updateRemainingTokens());
+                }
+            }
+        } catch (Exception e) {
+            // Client gracefully disconnected
+        }
+    }
+
+    public void registerClientInUI(String clientId) {
+        if (clientId == null || clientId.trim().isEmpty()) return;
+        SwingUtilities.invokeLater(() -> {
+            DefaultComboBoxModel<String> model = (DefaultComboBoxModel<String>) targetClientBox.getModel();
+            if (model.getIndexOf(clientId) == -1) {
+                targetClientBox.addItem(clientId);
+            }
+        });
+    }
+
+    public GatewayCluster getCluster() {
+        if (cluster == null) resetClusterFromUI();
+        return cluster;
+    }
+
+    private JPanel createTopPanel() {
         JPanel configPanel = new JPanel(new GridLayout(7, 1, 0, 0));
         configPanel.setBorder(BorderFactory.createTitledBorder("API Gateway Engine Config Matrix"));
 
@@ -150,158 +308,26 @@ public class GatewayDemoFrame extends JFrame {
         return panel;
     }
 
-	/**
-     * Starts the TCP server to handle client connections.
-     * Each client connection is handled in a separate thread.
-     */
-    private void startTCPServer() {
-        new Thread(() -> {
-			int port = 12345;
-            try (ServerSocket serverSocket = new ServerSocket(port)) {
-				// CRITICAL: Set the reuse option BEFORE binding
-				// if (serverSocket.supportedOptions().contains(StandardSocketOptions.SO_REUSEPORT)) {
-				// 	// can only toggle SO_REUSEPORT on Linux
-				// 	serverSocket.setOption(StandardSocketOptions.SO_REUSEPORT, true);
-				// }
-				// // on Windows, skip, cannot do that
-
-				// serverSocket.bind(new InetSocketAddress(port));
-
-                while (true) {
-                    Socket clientSocket = serverSocket.accept();
-                    new Thread(() -> handleTCPClientConnection(clientSocket)).start();
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }).start();
-    }
-
-	/**
-     * Handles a TCP client connection.
-     * Processes commands sent by the client and responds accordingly.
-     *
-     * @param socket The client socket.
-     */
-    private void handleTCPClientConnection(Socket socket) {
-        // CRITICAL FIX: Matching the raw Data Streams on the backend router
-        try (DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-             DataInputStream in = new DataInputStream(socket.getInputStream())) {
-            
-            while (true) {
-                String cmd = in.readUTF();
-                if ("REGISTER".equals(cmd)) {
-                    String clientId = in.readUTF();
-                    SwingUtilities.invokeLater(() -> registerClient(clientId));
-                } else if ("LOG".equals(cmd)) {
-                    String text = in.readUTF();
-                    SwingUtilities.invokeLater(() -> log(text));
-                } else if ("UPDATE_STATUS".equals(cmd)) {
-                    String clientId = in.readUTF();
-                    String path = in.readUTF();
-                    lastRemoteClientId = clientId;
-                    lastRemotePath = path;
-                } else if ("SEND_ROUND_ROBIN".equals(cmd)) {
-                    String clientId = in.readUTF();
-                    String path = in.readUTF();
-                    String method = in.readUTF();
-                    
-                    ApiRequest request = new ApiRequest(clientId, path, method);
-                    ApiResponse response = cluster.sendRoundRobin(request);
-                    
-                    out.writeInt(response.getStatusCode());
-                    out.writeUTF(response.getMessage());
-                    out.writeUTF(response.getGatewayName());
-                    out.writeInt(response.getRemainingTokens());
-                    out.flush();
-                } else if ("SEND_TO_NODE".equals(cmd)) {
-                    String clientId = in.readUTF();
-                    String path = in.readUTF();
-                    String method = in.readUTF();
-                    int nodeIndex = in.readInt();
-                    
-                    ApiRequest request = new ApiRequest(clientId, path, method);
-                    ApiResponse response = cluster.sendToNode(request, nodeIndex);
-                    
-                    out.writeInt(response.getStatusCode());
-                    out.writeUTF(response.getMessage());
-                    out.writeUTF(response.getGatewayName());
-                    out.writeInt(response.getRemainingTokens());
-                    out.flush();
-                } else if ("GET_REMAINING_TOKENS".equals(cmd)) {
-                    String clientId = in.readUTF();
-                    String path = in.readUTF();
-                    String details = cluster != null ? cluster.getRemainingTokensDetailed(clientId, path) : "Cluster offline";
-                    out.writeUTF(details);
-                    out.flush();
-                } else if ("UPDATE_REMAINING_TOKENS_TRIGGER".equals(cmd)) {
-                    SwingUtilities.invokeLater(() -> updateRemainingTokens());
-                }
-            }
-        } catch (Exception e) {
-            // Socket disconnected properly
-        }
-    }
-
-	/**
-     * Registers a client in the target client dropdown if it is not already registered.
-     *
-     * @param clientId The client ID to register.
-     */
-    public void registerClient(String clientId) {
-        if (clientId == null || clientId.trim().isEmpty()) {
-            return;
-        }
-        for (int i = 0; i < targetClientBox.getItemCount(); i++) {
-            if (targetClientBox.getItemAt(i).equals(clientId)) {
-                return;
-            }
-        }
-        targetClientBox.addItem(clientId);
-    }
-
-	/**
-     * Retrieves the current GatewayCluster instance, initializing it if necessary.
-     *
-     * @return The GatewayCluster instance.
-     */
-    public GatewayCluster getCluster() {
-        if (cluster == null) {
-            resetCluster();
-        }
-        return cluster;
-    }
-
-	/**
-     * Updates the remaining tokens label in the GUI by retrieving the token details from the cluster.
-     */
     public void updateRemainingTokens() {
-        // Safe decoupled UI status tracking 
-        String clientId = lastRemoteClientId != null ? lastRemoteClientId : "client-1";
-        String selectedPath = lastRemotePath != null ? lastRemotePath : "/users";
-        
-        String inspectionPath = "/users";
-        if (selectedPath != null && !selectedPath.contains("Randomize")) {
-            inspectionPath = selectedPath;
-        }
-        
         if (cluster != null) {
-			// show minTokens of all clients
-            StringBuilder sb = new StringBuilder("Min Tokens -> ");
-			for (int i = 0; i < targetClientBox.getItemCount(); i++) {
-				String client = targetClientBox.getItemAt(i);
-				if ("All Clients".equalsIgnoreCase(client)) continue;
-		
-				int minTokens = cluster.getRemainingTokens(client, inspectionPath);
-				sb.append(client + ": " + minTokens + " ");
-			}
-            // remainingLabel.setText("Remaining Tokens -> " + cluster.getRemainingTokensDetailed(clientId, inspectionPath));
-			remainingLabel.setText(sb.toString());
+            String inspectionPath = "/users";
+            if (!lastRemotePath.contains("Randomize")) {
+                inspectionPath = lastRemotePath;
+            }
+            
+            StringBuilder sb = new StringBuilder("<html><b>Remaining Tokens per Client:</b><br>");
+            for (int i = 0; i < targetClientBox.getItemCount(); i++) {
+                String cId = targetClientBox.getItemAt(i);
+                if ("All Clients".equalsIgnoreCase(cId)) continue;
+                String details = cluster.getRemainingTokensDetailed(cId, inspectionPath);
+                sb.append("&nbsp;&nbsp;• <b>").append(cId).append("</b>: ").append(details).append("<br>");
+            }
+            sb.append("</html>");
+            remainingLabel.setText(sb.toString());
         }
     }
 
-	// updates rules and state
-    private void resetCluster() {
+    private void resetClusterFromUI() {
         RateLimitConfig newConfig = new RateLimitConfig(
                 chkTokenBucket.isSelected(), 
                 ((Number) tbCapacitySpinner.getValue()).intValue(), 
@@ -329,27 +355,22 @@ public class GatewayDemoFrame extends JFrame {
             cluster.resetLimiter(); 
             log("Rules updated for: " + target + ". Database wiped.");
         }
-
+        
+        // Save the settings to disk immediately upon application
+        saveState();
         updateRemainingTokens();
     }
 
-	/**
-     * Logs a message to the console log area with appropriate color coding for status codes.
-     *
-     * @param text The message to log.
-     */
     public void log(String text) {
         Color color = Color.BLACK;
         if (text.contains("status=") && !text.contains("status=200")) {
-			// not OK
             if (text.contains("status=429")) {
-				// Too many requests
                 color = new Color(255, 0, 0);
             } else if (text.contains("status=404")) {
-				// No backend service
                 color = new Color(255, 179, 0);
             }
         }
+        
         try {
             javax.swing.text.StyledDocument doc = logArea.getStyledDocument();
             javax.swing.text.SimpleAttributeSet aset = new javax.swing.text.SimpleAttributeSet();
@@ -359,5 +380,12 @@ public class GatewayDemoFrame extends JFrame {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            GatewayDemoFrame frame = new GatewayDemoFrame();
+            frame.setVisible(true);
+        });
     }
 }
